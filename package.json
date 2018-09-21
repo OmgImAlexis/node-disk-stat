@@ -23,5 +23,8 @@
     "url": "https://github.com/jub3i/node-disk-stat/issues"
   },
   "author": "jub3i",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esm": "^3.0.84"
+  }
 }

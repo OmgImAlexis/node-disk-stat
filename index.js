@@ -1,86 +1,5 @@
-var fs = require('fs');
-
-module.exports = {
-  usageRead: usageRead,
-  usageWrite: usageWrite,
-  raw: raw,
-};
-
-/* PUBLIC */
-
-//NOTE: get sector size in bytes: `sudo hdparm -I /dev/sda | grep Physical`
-//NOTE: get sector size in bytes: `cat /sys/block/sda/queue/physical_block_size`
-function usageRead(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = {
-      sectorSizeBytes: 512,
-      sampleMs: 1000,
-      device: 'sda',
-      units: 'bytes',
-    };
-  } else {
-    opts.sectorSizeBytes = opts.sectorSizeBytes || 512;
-    opts.sampleMs = opts.sampleMs || 1000;
-    opts.device =  opts.device || 'sda';
-    opts.units =  opts.units || 'bytes';
-  }
-
-  var time;
-  var delta1;
-  var delta0 = _parseProcDiskstats()[opts.device].sectorsRead;
-  time = process.hrtime();
-  setTimeout(function() {
-    delta1 = _parseProcDiskstats()[opts.device].sectorsRead;
-
-    var diff = process.hrtime(time);
-    var diffSeconds = diff[0] + diff[1] * 1e-9;
-
-    var totalBytes = (delta1 - delta0) * opts.sectorSizeBytes;
-    var totalBytesPerSecond = totalBytes / (diffSeconds * diffSeconds);
-    var converted = _bytesTo(totalBytesPerSecond, opts.units);
-
-    return cb(converted);
-  }, opts.sampleMs);
-}
-
-function usageWrite(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = {
-      sectorSizeBytes: 512,
-      sampleMs: 1000,
-      device: 'sda',
-      units: 'KiB',
-    };
-  } else {
-    opts.sectorSizeBytes = opts.sectorSizeBytes || 512;
-    opts.sampleMs = opts.sampleMs || 1000;
-    opts.device =  opts.device || 'sda';
-    opts.units =  opts.units || 'bytes';
-  }
-
-  var time;
-  var delta1;
-  var delta0 = _parseProcDiskstats()[opts.device].sectorsWritten;
-  time = process.hrtime();
-  setTimeout(function() {
-    delta1 = _parseProcDiskstats()[opts.device].sectorsWritten;
-
-    var diff = process.hrtime(time);
-    var diffSeconds = diff[0] + diff[1] * 1e-9;
-
-    var totalBytes = (delta1 - delta0) * opts.sectorSizeBytes;
-    var totalBytesPerSecond = totalBytes / (diffSeconds * diffSeconds);
-    var converted = _bytesTo(totalBytesPerSecond, opts.units);
-
-    return cb(converted);
-  }, opts.sampleMs);
-}
-
-function raw() {
-  return _parseProcDiskstats();
-}
+import fs from 'fs';
+import delay from 'delay';
 
 /* PRIVATE */
 
@@ -126,13 +45,13 @@ function raw() {
       I/O completion time and the backlog that may be accumulating.
 */
 
-//NOTE: sourced from `https://github.com/soldair/node-procfs-stats/blob/feca2a940805b31f9e7d5c0bd07c4e3f8d3d5303/index.js#L228`
-function _parseProcDiskstats() {
+// @NOTE: sourced from `https://github.com/soldair/node-procfs-stats/blob/feca2a940805b31f9e7d5c0bd07c4e3f8d3d5303/index.js#L228`
+const _parseProcDiskstats = () => {
   var diskstats = fs.readFileSync('/proc/diskstats');
   var lines = diskstats.toString().trim().split('\n');
   var data = {};
 
-  lines.forEach(function(line) {
+  lines.forEach(function (line) {
     var values = line.trim().split(/\s+/);
     data[values[2]] = {
       deviceNumber: values[0],
@@ -152,34 +71,88 @@ function _parseProcDiskstats() {
   });
 
   return data;
-}
+};
 
-function _bytesTo(bytes, units) {
-  var KiB = 1024;
-  var MiB = 1024 * KiB;
-  var GiB = 1024 * MiB;
+const _bytesTo = (bytes, units) => {
+  const KiB = 1024;
+  const MiB = 1024 * KiB;
+  const GiB = 1024 * MiB;
 
-  switch (units) {
-    case 'bytes':
-      break;
-    case 'KiB':
-      bytes /= KiB;
-      break;
-    case 'MiB':
-      bytes /= MiB;
-      break;
-    case 'GiB':
-      bytes /= GiB;
-      break;
-    default:
-      var errMsg =
-        '[disk-stats] Error: Unknown units "' + units + '", use one of: ' +
-        '"bytes" (default), "KiB", "MiB" or "GiB"';
-      console.log(errMsg);
-  }
+  const converted = {
+    bytes,
+    KiB: bytes /= KiB,
+    MiB: bytes /= MiB,
+    GiB: bytes /= GiB
+  }[units];
 
   //NOTE: the variable named `bytes` may not actually contain a number
   //representing the number of bytes. its done this way to only have to use one
   //variable.
-  return bytes;
+  return converted || console.log(`'[disk-stats] Error: Unknown units "${units}", use one of: "bytes" (default), "KiB", "MiB" or "GiB"';`);
+}
+
+/* PUBLIC */
+
+// @NOTE: get sector size in bytes: `sudo hdparm -I /dev/sda | grep Physical`
+// @NOTE: get sector size in bytes: `cat /sys/block/sda/queue/physical_block_size`
+export const usageRead = opts => {
+  // Defaults
+  opts.sectorSizeBytes = opts.sectorSizeBytes || 512;
+  opts.sampleMs = opts.sampleMs || 1000;
+  opts.device =  opts.device || 'sda';
+  opts.units =  opts.units || 'bytes';
+
+  let time;
+  let delta1;
+  let delta0 = _parseProcDiskstats()[opts.device].sectorsRead;
+  time = process.hrtime();
+  return new Promise(async resolve => {
+    await delay(opts.sampleMs);
+
+    delta1 = _parseProcDiskstats()[opts.device].sectorsRead;
+
+    const diff = process.hrtime(time);
+    const diffSeconds = diff[0] + diff[1] * 1e-9;
+
+    const totalBytes = (delta1 - delta0) * opts.sectorSizeBytes;
+    const totalBytesPerSecond = totalBytes / (diffSeconds * diffSeconds);
+    const converted = _bytesTo(totalBytesPerSecond, opts.units);
+
+    return resolve(converted);
+  });
+};
+
+export const usageWrite = opts => {
+  opts.sectorSizeBytes = opts.sectorSizeBytes || 512;
+  opts.sampleMs = opts.sampleMs || 1000;
+  opts.device =  opts.device || 'sda';
+  opts.units =  opts.units || 'bytes';
+
+  let time;
+  let delta1;
+  let delta0 = _parseProcDiskstats()[opts.device].sectorsWritten;
+  time = process.hrtime();
+  return new Promise(async resolve => {
+    await delay(opts.sampleMs);
+    delta1 = _parseProcDiskstats()[opts.device].sectorsWritten;
+
+    const diff = process.hrtime(time);
+    const diffSeconds = diff[0] + diff[1] * 1e-9;
+
+    const totalBytes = (delta1 - delta0) * opts.sectorSizeBytes;
+    const totalBytesPerSecond = totalBytes / (diffSeconds * diffSeconds);
+    const converted = _bytesTo(totalBytesPerSecond, opts.units);
+
+    return resolve(converted);
+  });
+};
+
+export const raw = () => {
+  return _parseProcDiskstats();
+};
+
+export default {
+  usageRead,
+  usageWrite,
+  raw
 }
